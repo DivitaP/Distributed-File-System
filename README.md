@@ -3,6 +3,91 @@
 ## Description
 This is a distributed file system with a multithreaded server (`dfs.c`) and client (`dfc.c`) in C. Files are chunked and distributed across servers using MD5 hash for load balancing, with redundancy (each chunk on two servers). Supports put, get, and list operations, handling server availability and version conflicts via timestamps.
 
+## Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              CLIENT (dfc.c)                                 │
+│  ┌─────────────┐  ┌──────────────┐  ┌──────────────┐  ┌─────────────┐     │
+│  │   PUT File  │  │   GET File   │  │  LIST Files  │  │  dfc.conf   │     │
+│  └──────┬──────┘  └──────┬───────┘  └──────┬───────┘  └─────────────┘     │
+│         │                │                  │                               │
+│         └────────────────┴──────────────────┘                               │
+│                          │                                                  │
+│                    MD5 Hash Logic                                           │
+│              (Determines chunk placement)                                   │
+└──────────────────────────┬──────────────────────────────────────────────────┘
+                           │
+        ┌──────────────────┼──────────────────┐
+        │                  │                  │
+        ▼                  ▼                  ▼
+┌───────────────┐  ┌───────────────┐  ┌───────────────┐
+│  DFS Server 1 │  │  DFS Server 2 │  │  DFS Server 3 │
+│  (Port 8001)  │  │  (Port 8002)  │  │  (Port 8003)  │
+├───────────────┤  ├───────────────┤  ├───────────────┤
+│ ./server1/    │  │ ./server2/    │  │ ./server3/    │
+│               │  │               │  │               │
+│ file.txt.1    │  │ file.txt.1    │  │ file.txt.2    │
+│ file.txt.4    │  │ file.txt.2    │  │ file.txt.3    │
+│               │  │ file.txt.3    │  │ file.txt.4    │
+└───────────────┘  └───────────────┘  └───────────────┘
+```
+
+## File Chunking & Distribution Example
+
+```
+Original File: example.txt (1.5 MB)
+                    ↓
+        Split into 4 chunks (based on # of servers)
+                    ↓
+    ┌───────┬───────┬───────┬───────┐
+    │Chunk 1│Chunk 2│Chunk 3│Chunk 4│
+    │ 384KB │ 384KB │ 384KB │ 384KB │
+    └───┬───┴───┬───┴───┬───┴───┬───┘
+        │       │       │       │
+     MD5 Hash determines placement with redundancy
+        │       │       │       │
+        ▼       ▼       ▼       ▼
+    
+    Chunk 1 → Server 1, Server 2  (Redundant copies)
+    Chunk 2 → Server 2, Server 3  (Redundant copies)
+    Chunk 3 → Server 3, Server 4  (Redundant copies)
+    Chunk 4 → Server 4, Server 1  (Redundant copies)
+```
+
+## Operations Flow
+
+### PUT Operation
+```
+Client                    Server 1              Server 2
+  │                          │                     │
+  │──── PUT example.txt ────▶│                     │
+  │   (with chunk 1 & 4)     │                     │
+  │                          │                     │
+  │──── PUT example.txt ─────┼────────────────────▶│
+  │   (with chunk 1 & 2)     │                     │
+  │                          │                     │
+  │◀──── ACK ────────────────│                     │
+  │◀──── ACK ────────────────┼─────────────────────│
+  │                          │                     │
+  │  "example.txt uploaded successfully"           │
+```
+
+### GET Operation
+```
+Client                    Server 1              Server 2
+  │                          │                     │
+  │──── GET example.txt ────▶│                     │
+  │                          │                     │
+  │──── GET example.txt ─────┼────────────────────▶│
+  │                          │                     │
+  │◀─── Chunk 1, 4 ──────────│                     │
+  │◀─── Chunk 1, 2 ──────────┼─────────────────────│
+  │                          │                     │
+  │  Reconstruct file from chunks (use latest)     │
+  │  "example.txt downloaded successfully"         │
+```
+
 ## Features
 - **Chunking & Distribution**: Files split into chunks based on available servers; hash determines placement.
 - **Redundancy**: Each chunk stored on two servers for fault tolerance.
@@ -51,6 +136,8 @@ gcc dfc.c -o dfs_client
 ```
 server DFS1 127.0.0.1:8001
 server DFS2 127.0.0.1:8002
+server DFS3 127.0.0.1:8003
+server DFS4 127.0.0.1:8004
 ```
 
 ## Dependencies
